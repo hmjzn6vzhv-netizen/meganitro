@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Mega Nitro Garage - Free Edition</title>
+    <style>
+        body { background-color: #111; color: white; font-family: 'Segoe UI', sans-serif; text-align: center; margin: 0; overflow: hidden; }
+        canvas { background-color: #222; border: 5px solid #444; display: block; margin: 5px auto; cursor: crosshair; }
+        .ui-panel { background: #333; padding: 8px; display: inline-block; border-radius: 10px; margin-top: 5px; }
+        h1 { margin: 0; font-size: 24px; }
+        p { margin: 5px 0 0 0; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-panel">
+        <h1>MEGA NITRO GARAGE</h1>
+        <p>Scegli il tuo veicolo (tutti sbloccati!) e schiva i bidoni della spazzatura sulla carreggiata.</p>
+    </div>
+
+    <canvas id="gameCanvas" width="1000" height="620"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        let gameState = "MENU";
+        let score = 0;
+        let roadOffset = 0;
+
+        // --- DATABASE VEICOLI (TUTTI LIBERI) ---
+        const vehicles = [
+            // Auto Normali
+            { name: "Rossa", color: "#E4002B", speed: 6, width: 60, height: 30, type: "AUTO" },
+            { name: "Gialla", color: "#FDD017", speed: 7, width: 60, height: 30, type: "AUTO" },
+            { name: "Verde", color: "#004225", speed: 5, width: 60, height: 30, type: "AUTO" },
+            { name: "Blu", color: "#002C5F", speed: 6, width: 60, height: 30, type: "AUTO" },
+            { name: "Arancio", color: "#FF7500", speed: 8, width: 65, height: 32, type: "AUTO" },
+            { name: "Ciano", color: "#00E5FF", speed: 9, width: 55, height: 28, type: "AUTO" },
+            { name: "Viola", color: "#4B0082", speed: 7, width: 60, height: 30, type: "AUTO" },
+            { name: "Rosa", color: "#FF2D95", speed: 8, width: 60, height: 30, type: "AUTO" },
+            { name: "Bianca", color: "#F0F0F0", speed: 6, width: 60, height: 30, type: "AUTO" },
+            { name: "Nera", color: "#1A1A1A", speed: 7, width: 60, height: 30, type: "AUTO" },
+
+            // Furgoncini
+            { name: "Furgone Cargo", color: "#d2dae2", speed: 5, width: 70, height: 40, type: "FURGONE" },
+            { name: "TNT Express", color: "#ffa801", speed: 6, width: 70, height: 40, type: "FURGONE" },
+            { name: "Ice Cream", color: "#ffc048", speed: 4, width: 65, height: 42, type: "FURGONE" },
+            { name: "Ambulanza", color: "#ffffff", speed: 7, width: 75, height: 40, type: "FURGONE" },
+            { name: "Nido d'api", color: "#05c46b", speed: 5, width: 70, height: 40, type: "FURGONE" },
+
+            // Limousine (Ora completamente gratuite)
+            { name: "Limo President", color: "#1e272e", speed: 7, width: 110, height: 30, type: "LIMO" },
+            { name: "Limo Hollywood", color: "#ffffff", speed: 8, width: 110, height: 30, type: "LIMO" },
+            { name: "Limo VIP Gold", color: "#ffd32a", speed: 9, width: 115, height: 30, type: "LIMO" },
+            { name: "Limo Neon Sky", color: "#ef5777", speed: 8, width: 110, height: 30, type: "LIMO" },
+            { name: "Limo Carbon", color: "#3d3d3d", speed: 7, width: 110, height: 30, type: "LIMO" }
+        ];
+
+        const difficulties = [
+            { label: "FACILE", speedMult: 1, roadHeight: 380 },
+            { label: "MEDIO", speedMult: 1.5, roadHeight: 320 },
+            { label: "DIFFICILE", speedMult: 2, roadHeight: 260 }
+        ];
+
+        let selectedVehicle = vehicles[0];
+        let selectedDiff = difficulties[0];
+
+        let vehicleButtons = [];
+        let diffButtons = [];
+
+        function initMenu() {
+            vehicleButtons = [];
+            diffButtons = [];
+            
+            for(let i=0; i<vehicles.length; i++) {
+                let row = 0; let col = 0;
+                if (vehicles[i].type === "AUTO") { row = Math.floor(i / 5); col = i % 5; } 
+                else if (vehicles[i].type === "FURGONE") { row = 2; col = i - 10; } 
+                else if (vehicles[i].type === "LIMO") { row = 3; col = i - 15; }
+
+                vehicleButtons.push({ x: 60 + col * 180, y: 70 + row * 85, w: 160, h: 75, vehicle: vehicles[i] });
+            }
+
+            for(let i=0; i<3; i++) {
+                diffButtons.push({ x: 200 + i * 220, y: 430, w: 180, h: 50, diff: difficulties[i] });
+            }
+        }
+
+        let player, obs1, obs2, roadTop, roadBottom, gameSpeed;
+
+        function startLevel() {
+            player = { x: 50, y: 300, width: selectedVehicle.width, height: selectedVehicle.height, speed: selectedVehicle.speed, color: selectedVehicle.color, type: selectedVehicle.type };
+            
+            // Proprietà bidoni (Struttura verticale w:36, h:40)
+            obs1 = { x: 1000, y: 200, w: 36, h: 40, speed: 5 * selectedDiff.speedMult, color: "#718093" }; // Grigio metallo
+            obs2 = { x: 1500, y: 350, w: 36, h: 40, speed: 6 * selectedDiff.speedMult, color: "#44bd32" }; // Verde ecologico
+            
+            let padding = (620 - selectedDiff.roadHeight) / 2;
+            roadTop = padding; roadBottom = 620 - padding;
+            gameSpeed = 6 * selectedDiff.speedMult;
+            gameState = "GIOCANDO";
+        }
+
+        canvas.addEventListener("click", (e) => {
+            if (gameState !== "MENU") return;
+            const r = canvas.getBoundingClientRect();
+            const mx = e.clientX - r.left;
+            const my = e.clientY - r.top;
+
+            vehicleButtons.forEach(b => {
+                if(mx > b.x && mx < b.x+b.w && my > b.y && my < b.y+b.h) {
+                    selectedVehicle = b.vehicle;
+                }
+            });
+
+            diffButtons.forEach(b => {
+                if(mx > b.x && mx < b.x+b.w && my > b.y && my < b.y+b.h) {
+                    selectedDiff = b.diff;
+                    startLevel();
+                }
+            });
+        });
+
+        // --- SISTEMA GRAFICO: VEICOLI ---
+        function drawVehicle(x, y, w, h, color, type, alpha) {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+
+            if (type === "AUTO") {
+                ctx.fillStyle = color; ctx.fillRect(x, y + (h * 0.33), w, h * 0.5);
+                ctx.fillStyle = "#333"; ctx.fillRect(x + (w * 0.25), y, w * 0.4, h * 0.33);
+                ctx.fillStyle = "#000"; ctx.fillRect(x + (w * 0.15), y + (h * 0.75), w * 0.18, h * 0.22); ctx.fillRect(x + (w * 0.65), y + (h * 0.75), w * 0.18, h * 0.22);
+            } else if (type === "FURGONE") {
+                ctx.fillStyle = color; ctx.fillRect(x, y, w, h * 0.8);
+                ctx.fillStyle = "#333"; ctx.fillRect(x + (w * 0.7), y + 4, w * 0.25, h * 0.3);
+                ctx.fillStyle = "#222"; ctx.fillRect(x + (w * 0.12), y + (h * 0.75), w * 0.2, h * 0.22); ctx.fillRect(x + (w * 0.68), y + (h * 0.75), w * 0.2, h * 0.22);
+            } else if (type === "LIMO") {
+                ctx.fillStyle = color; ctx.fillRect(x, y + (h * 0.33), w, h * 0.5);
+                ctx.fillStyle = "#111"; ctx.fillRect(x + (w * 0.15), y, w * 0.15, h * 0.33); ctx.fillRect(x + (w * 0.35), y, w * 0.25, h * 0.33); ctx.fillRect(x + (w * 0.65), y, w * 0.15, h * 0.33);
+                ctx.fillStyle = "#000"; ctx.fillRect(x + (w * 0.08), y + (h * 0.75), w * 0.1, h * 0.22); ctx.fillRect(x + (w * 0.45), y + (h * 0.75), w * 0.1, h * 0.22); ctx.fillRect(x + (w * 0.82), y + (h * 0.75), w * 0.1, h * 0.22);
+            }
+
+            ctx.restore();
+        }
+
+        // --- SISTEMA GRAFICO: RENDERING BIDONE DELLA SPAZZATURA ---
+        function drawTrashCan(x, y, w, h, mainColor) {
+            ctx.save();
+            
+            // Corpo cilindrico principale
+            ctx.fillStyle = mainColor;
+            ctx.fillRect(x + 4, y + 6, w - 8, h - 8);
+
+            // Ombra di fondo del bidone
+            ctx.fillStyle = "#2f3640";
+            ctx.fillRect(x + 4, y + h - 5, w - 8, 3);
+
+            // Scanalature verticali
+            ctx.strokeStyle = "rgba(0,0,0,0.25)";
+            ctx.lineWidth = 2;
+            let step = (w - 8) / 4;
+            for(let i = 1; i < 4; i++) {
+                ctx.beginPath();
+                ctx.moveTo(x + 4 + (i * step), y + 8);
+                ctx.lineTo(x + 4 + (i * step), y + h - 6);
+                ctx.stroke();
+            }
+
+            // Coperchio sporgente
+            ctx.fillStyle = mainColor;
+            ctx.fillRect(x, y + 2, w, 4); 
+            ctx.fillStyle = "#2f3640"; 
+            ctx.fillRect(x, y + 5, w, 1);
+
+            // Maniglia superiore coperchio
+            ctx.strokeStyle = mainColor;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(x + (w / 2), y + 3, 5, Math.PI, 0); 
+            ctx.stroke();
+
+            // Maniglie laterali
+            ctx.fillStyle = "#2f3640";
+            ctx.fillRect(x - 2, y + 12, 2, 6); 
+            ctx.fillRect(x + w, y + 12, 2, 6); 
+
+            ctx.restore();
+        }
+
+        let keys = {};
+        window.onkeydown = (e) => keys[e.key] = true;
+        window.onkeyup = (e) => keys[e.key] = false;
+
+        function update() {
+            if (gameState !== "GIOCANDO") return;
+            if (keys["ArrowUp"]) player.y -= player.speed;
+            if (keys["ArrowDown"]) player.y += player.speed;
+            if (player.y < roadTop || player.y + player.height > roadBottom) return gameOver("Fuori strada!");
+
+            obs1.x -= obs1.speed; obs2.x -= obs2.speed; roadOffset -= gameSpeed;
+            if (roadOffset <= -80) roadOffset = 0;
+
+            if (obs1.x < -40) { score++; obs1.x = 1000; obs1.y = roadTop + Math.random()*(roadBottom-roadTop-45); obs1.speed += 0.2; }
+            if (obs2.x < -40) { score++; obs2.x = 1000 + Math.random()*300; obs2.y = roadTop + Math.random()*(roadBottom-roadTop-45); obs2.speed += 0.2; }
+            if (col(player, obs1) || col(player, obs2)) gameOver("Schianto contro un bidone dell'immondizia!");
+        }
+
+        function col(a, b) { return a.x < b.x+b.w && a.x+a.width > b.x && a.y < b.y+b.h && a.y+a.height > b.y; }
+        function gameOver(m) { alert(m + " Punti totalizzati: " + score); gameState = "MENU"; score = 0; }
+
+        function draw() {
+            ctx.clearRect(0,0,1000,620);
+
+            if (gameState === "MENU") {
+                ctx.fillStyle = "#1e272e"; ctx.fillRect(0, 0, 1000, 620);
+
+                vehicleButtons.forEach(b => {
+                    ctx.fillStyle = "#2d3748"; ctx.fillRect(b.x, b.y, b.w, b.h);
+
+                    if(selectedVehicle === b.vehicle) {
+                        ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 3; ctx.strokeRect(b.x, b.y, b.w, b.h);
+                    } else {
+                        ctx.strokeStyle = "#4a5568"; ctx.lineWidth = 1; ctx.strokeRect(b.x, b.y, b.w, b.h);
+                    }
+
+                    let alphaVal = (selectedVehicle === b.vehicle) ? 1.0 : 0.4;
+                    let offsetX = b.x + (b.w - b.vehicle.width) / 2;
+                    let offsetY = b.y + (b.h - b.vehicle.height) / 2 - 6;
+
+                    drawVehicle(offsetX, offsetY, b.vehicle.width, b.vehicle.height, b.vehicle.color, b.vehicle.type, alphaVal);
+
+                    ctx.fillStyle = (selectedVehicle === b.vehicle) ? "#38bdf8" : "#94a3b8";
+                    ctx.font = "11px sans-serif";
+                    ctx.fillText(b.vehicle.name.toUpperCase(), b.x + 8, b.y + b.h - 8);
+                });
+
+                diffButtons.forEach(b => {
+                    ctx.fillStyle = (selectedDiff === b.diff) ? "#38bdf8" : "#444"; ctx.fillRect(b.x, b.y, b.w, b.h);
+                    ctx.fillStyle = (selectedDiff === b.diff) ? "black" : "white"; ctx.font = "bold 15px sans-serif";
+                    ctx.fillText(b.diff.label, b.x + (b.w/2) - 30, b.y + 30);
+                });
+
+                ctx.fillStyle = "white"; ctx.font = "bold 18px sans-serif"; ctx.fillText("CONFERMA DIFFICOLTÀ PER FAR PARTIRE IL MOTORE", 250, 520);
+            } else {
+                // Pista e scenario attivo
+                ctx.fillStyle = "#1e824c"; ctx.fillRect(0,0,1000,620);
+                ctx.fillStyle = "#3d3d3d"; ctx.fillRect(0, roadTop, 1000, roadBottom-roadTop);
+                ctx.fillStyle = "#d2dae2"; ctx.fillRect(0, roadTop, 1000, 5); ctx.fillRect(0, roadBottom - 5, 1000, 5); 
+                ctx.fillStyle = "#fff200";
+                for(let x=roadOffset; x<1000; x+=80) ctx.fillRect(x, 305, 40, 8);
+                
+                drawVehicle(player.x, player.y, player.width, player.height, player.color, player.type, 1.0);
+                
+                // --- RENDERING DEI BIDONI DELLA SPAZZATURA ---
+                drawTrashCan(obs1.x, obs1.y, obs1.w, obs1.h, obs1.color);
+                drawTrashCan(obs2.x, obs2.y, obs2.w, obs2.h, obs2.color);
+                
+                ctx.fillStyle = "white"; ctx.font = "bold 24px sans-serif"; ctx.fillText("PUNTI GARA: " + score, 30, roadTop - 15);
+            }
+        }
+
+        initMenu();
+        function loop() { update(); draw(); requestAnimationFrame(loop); }
+        loop();
+    </script>
+</body>
+</html>
